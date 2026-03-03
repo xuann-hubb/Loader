@@ -1412,32 +1412,7 @@ local function performAutoSellSingleBatch(sellAmountByFruit)
             pcall(function()
                 SellRemote:InvokeServer("SellSingle")
             end)
-            -- wait until the held fruit tool is actually sold/removed before continuing
-            local sellChar = player and player.Character
-            if sellChar then
-                local deadline = os.clock() + 2.5
-                repeat
-                    task.wait(0.05)
-                    local stillHeld = false
-                    for _, t in ipairs(sellChar:GetChildren()) do
-                        if t:IsA("Tool") then
-                            local hf = t:GetAttribute("HarvestedFrom")
-                            local bn = t:GetAttribute("BaseName")
-                            local tn = tostring(t.Name):lower()
-                            local fn = tostring(fruit):lower()
-                            if (hf and tostring(hf):lower() == fn)
-                                or (bn and tostring(bn):lower() == fn)
-                                or tn == fn then
-                                stillHeld = true
-                                break
-                            end
-                        end
-                    end
-                    if not stillHeld then break end
-                until os.clock() >= deadline
-            else
-                task.wait(0.3)
-            end
+            task.wait(0.5)
         end
     end
 
