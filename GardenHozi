@@ -353,6 +353,14 @@ local PlantsModels = ReplicatedStorage:FindFirstChild("Plants") and ReplicatedSt
 local SELL_POINT = workspace:WaitForChild("MapPhysical"):WaitForChild("CashRegister"):WaitForChild("Part")
 local ShopsFolder = workspace:WaitForChild("MapPhysical"):WaitForChild("Shops")
 
+-- Sprinkler durations (seconds) keyed by gear name
+local SPRINKLER_DURATIONS = {
+    ["Basic Sprinkler"]  = 300,
+    ["Turbo Sprinkler"]  = 600,
+    ["Super Sprinkler"]  = 900,
+}
+local sprinklerExpireAt = 0  -- os.clock() timestamp when the active sprinkler expires
+
 -- optional teleport helpers – some games expose a Teleports folder, otherwise we fall back to hard‑coded vectors
 local Teleports = workspace:FindFirstChild("Teleports") or {}
 
@@ -2980,10 +2988,23 @@ task.spawn(function()
             autoWaterPlants(selectedWaterPlants)
         end
         if autoSprinkler then
-            autoSprinklerPlants(selectedSprinklerPlants, selectedSprinklerGear)
-            -- Disable after one full run so it doesn't spam
-            autoSprinkler = false
-            pcall(function() AutoSprinklerToggle:SetValue(false) end)
+            if os.clock() >= sprinklerExpireAt then
+                autoSprinklerPlants(selectedSprinklerPlants, selectedSprinklerGear)
+                -- Determine duration from the first selected sprinkler gear
+                local sprinklerDur = 300 -- fallback: Basic Sprinkler
+                if type(selectedSprinklerGear) == "table" then
+                    for _, gName in ipairs(selectedSprinklerGear) do
+                        local d = SPRINKLER_DURATIONS[tostring(gName)]
+                        if d then
+                            sprinklerDur = d
+                            break
+                        end
+                    end
+                end
+                sprinklerExpireAt = os.clock() + sprinklerDur
+            end
+        else
+            sprinklerExpireAt = 0  -- reset timer when toggled off
         end
         task.wait(plantInterval)
     end
