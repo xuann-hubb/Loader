@@ -306,6 +306,7 @@ local State = {
     lastAutoSellAllAt = 0,
     autoSellAllCooldown = 2,
     autoPlant = false,
+    plantMode = "Around Player",
     autoHarvest = false,
     autoRejoinWhenHarvestAll = false,
     harvestDetectedSinceRejoin = false,
@@ -1969,11 +1970,18 @@ function autoPlantSeeds(selectedSeeds)
             if enabled then
                 local equipped, plantType = findAndEquipSeedTool(seedName)
                 if equipped and type(plantType) == "string" and plantType ~= "" then
-                    for x=-4,4,2 do
-                        for z=-4,4,2 do
-                            pcall(function()
-                                PlantRemote:InvokeServer(plantType, pos + Vector3.new(x, -3, z))
-                            end)
+                    if plantMode == "Player Position" then
+                        pcall(function()
+                            PlantRemote:InvokeServer(plantType, pos + Vector3.new(0, -3, 0))
+                        end)
+                    else
+                        -- "Around Player" grid
+                        for x=-4,4,2 do
+                            for z=-4,4,2 do
+                                pcall(function()
+                                    PlantRemote:InvokeServer(plantType, pos + Vector3.new(x, -3, z))
+                                end)
+                            end
                         end
                     end
                 end
@@ -2229,6 +2237,19 @@ local SeedAutoDropdown = PlantAutomationSection:Dropdown({
     end,
 })
 trackConfigElement("SeedAutoDropdown", SeedAutoDropdown)
+
+local PlantModeDropdown = PlantAutomationSection:Dropdown({
+    Title = "Plant Mode",
+    Desc = "Where seeds are planted relative to your character",
+    Values = { "Around Player", "Player Position" },
+    Value = "Around Player",
+    Multi = false,
+    AllowNone = false,
+    Callback = function(option)
+        plantMode = tostring(option or "Around Player")
+    end,
+})
+trackConfigElement("PlantModeDropdown", PlantModeDropdown)
 
 local AutoPlantToggle = PlantAutomationSection:Toggle({
     Title = "Auto Plant",
