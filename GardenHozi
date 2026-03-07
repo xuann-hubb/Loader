@@ -3091,7 +3091,7 @@ do
             ClaimSelectedPlotRemote:FireServer(first.PlotName)
             -- dismiss loading screen via random click + random key press
             task.spawn(function()
-                task.wait(0.7)
+                task.wait(0.6)
                 pcall(function()
                     local UIS = game:GetService("UserInputService")
                     local VIM = game:GetService("VirtualInputManager")
