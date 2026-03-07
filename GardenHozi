@@ -2651,6 +2651,69 @@ do
         return "Weight: " .. tostring(weightValue)
     end
 
+    -- Cached plant definition modules for value calculation
+    local _plantDefs, _mutDefs, _varDefs
+    local function getDefinitions()
+        if not _plantDefs then
+            local ok1, d1 = pcall(require, ReplicatedStorage.Plants.Definitions.PlantDefinitions)
+            local ok2, d2 = pcall(require, ReplicatedStorage.Plants.Definitions.MutationDataDefinitions)
+            local ok3, d3 = pcall(require, ReplicatedStorage.Plants.Definitions.VariantDataDefinitions)
+            _plantDefs = (ok1 and type(d1) == "table") and d1 or {}
+            _mutDefs   = (ok2 and type(d2) == "table") and d2 or {}
+            _varDefs   = (ok3 and type(d3) == "table") and d3 or {}
+        end
+        return _plantDefs, _mutDefs, _varDefs
+    end
+
+    local function getFruitValue(p)
+        local directVal = p:GetAttribute("FruitValue")
+        if directVal and typeof(directVal) == "number" and directVal > 0 then
+            return directVal
+        end
+        local harvestedFrom = p:GetAttribute("HarvestedFrom")
+        -- For in-world (unharvested) fruits, HarvestedFrom is nil; derive the plant
+        -- type from the parent model name (e.g. "Carrot1" → "Carrot")
+        if not harvestedFrom or typeof(harvestedFrom) ~= "string" then
+            local parent = p.Parent
+            if parent and parent:IsA("Model") then
+                local derived = parent.Name:gsub("%d+$", ""):gsub("%s+$", "")
+                if derived ~= "" then
+                    harvestedFrom = derived
+                end
+            end
+        end
+        if not harvestedFrom or typeof(harvestedFrom) ~= "string" then return 0 end
+        local plantDefs, mutDefs, varDefs = getDefinitions()
+        local plantDef = plantDefs[harvestedFrom]
+        if not plantDef then return 0 end
+        local baseVal = plantDef.FruitBaseValue or (plantDef.PlantBaseValue or 0)
+        if baseVal <= 0 then return 0 end
+        local hiddenNum = p:GetAttribute("HiddenNumber") or 1
+        local hn = typeof(hiddenNum) ~= "number" and 1 or hiddenNum
+        local mutMult = 1
+        local mutation = p:GetAttribute("Mutation")
+        if mutation and typeof(mutation) == "string" and mutation ~= "" then
+            local totalMult, count = 0, 0
+            for entry in string.gmatch(mutation, "([^,]+)") do
+                local mutData = mutDefs[entry:match("^%s*(.-)%s*$")]
+                if mutData and mutData.priceMultiplier then
+                    count = count + 1
+                    totalMult = totalMult + mutData.priceMultiplier
+                end
+            end
+            if count > 0 then mutMult = totalMult + 1 - count end
+        end
+        local varMult = 1
+        local variant = p:GetAttribute("Variant")
+        if variant and typeof(variant) == "string" then
+            local varData = varDefs[variant]
+            if varData and varData.priceMultiplier then varMult = varData.priceMultiplier end
+        end
+        local ripenessRaw = p:GetAttribute("RipenessMultiplier") or 1
+        local ripenessMult = typeof(ripenessRaw) ~= "number" and 1 or ripenessRaw
+        return math.floor(baseVal * hn * hn * mutMult * varMult * ripenessMult)
+    end
+
     local function getFruitWeightAdornee(fruitInstance)
         if not fruitInstance then
             return nil
@@ -2704,6 +2767,9 @@ do
         end
 
         local weightText = formatFruitWeightText(fruitWeight)
+        local valueAmt = 0
+        pcall(function() valueAmt = getFruitValue(fruitInstance) end)
+        local valueText = string.format("Value: %d", valueAmt)
         local billboardGui = espEntries[fruitInstance]
         if (not billboardGui) or (billboardGui.Parent ~= adorneePart) then
             removeFruitESP(fruitInstance)
@@ -2713,7 +2779,7 @@ do
             billboardGui.AlwaysOnTop = true
             billboardGui.LightInfluence = 0
             billboardGui.MaxDistance = 250
-            billboardGui.Size = UDim2.fromOffset(130, 26)
+            billboardGui.Size = UDim2.fromOffset(160, 44)
             billboardGui.StudsOffset = Vector3.new(0, 1.5, 0)
             billboardGui.Adornee = adorneePart
             billboardGui.Parent = adorneePart
@@ -2721,7 +2787,8 @@ do
             local textLabel = Instance.new("TextLabel")
             textLabel.Name = "WeightText"
             textLabel.BackgroundTransparency = 1
-            textLabel.Size = UDim2.fromScale(1, 1)
+            textLabel.Position = UDim2.new(0, 0, 0, 0)
+            textLabel.Size = UDim2.fromScale(1, 0.5)
             textLabel.Font = Enum.Font.GothamBold
             textLabel.TextScaled = true
             textLabel.TextStrokeTransparency = 0.35
@@ -2729,12 +2796,28 @@ do
             textLabel.Text = weightText
             textLabel.Parent = billboardGui
 
+            local valueLabel = Instance.new("TextLabel")
+            valueLabel.Name = "ValueText"
+            valueLabel.BackgroundTransparency = 1
+            valueLabel.Position = UDim2.new(0, 0, 0.5, 0)
+            valueLabel.Size = UDim2.fromScale(1, 0.5)
+            valueLabel.Font = Enum.Font.GothamBold
+            valueLabel.TextScaled = true
+            valueLabel.TextStrokeTransparency = 0.35
+            valueLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+            valueLabel.Text = valueText
+            valueLabel.Parent = billboardGui
+
             espEntries[fruitInstance] = billboardGui
         end
 
         local displayLabel = billboardGui:FindFirstChild("WeightText")
         if displayLabel and displayLabel:IsA("TextLabel") then
             displayLabel.Text = weightText
+        end
+        local displayValue = billboardGui:FindFirstChild("ValueText")
+        if displayValue and displayValue:IsA("TextLabel") then
+            displayValue.Text = valueText
         end
         billboardGui.Enabled = espEnabled
     end
@@ -2768,8 +2851,8 @@ do
     local ESPSection = ESPTab:Section({ Title = "Fruit ESP", Opened = true })
 
     local FruitWeightESPToggle = ESPSection:Toggle({
-        Title = "Show Fruit Weight",
-        Desc = "Display Fruit Weight",
+        Title = "Show Fruit Weight And Value",
+        Desc = "Display Fruit Weight And Value",
         Value = false,
         Callback = function(state)
             espEnabled = state
@@ -3028,6 +3111,315 @@ task.spawn(function()
             sprinklerExpireAt = 0  -- reset timer when toggled off
         end
         task.wait(plantInterval)
+    end
+end)
+
+-- ================= EVENTS TAB =================
+local EventsTab = Window:Tab({
+    Title = "Events",
+    Icon = "solar:star-bold",
+    Locked = false,
+})
+
+-- ========== BOTANIST (MAYA) SECTION ==========
+local BotanistSection = EventsTab:Section({ Title = "Botanist (Maya)", Opened = true })
+
+local BotanistQuestRemote = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("BotanistQuestRequest")
+
+local _botanistDefs
+local function getBotanistDefinitions()
+    if not _botanistDefs then
+        local ok, d = pcall(require, ReplicatedStorage
+            :WaitForChild("Plants")
+            :WaitForChild("Definitions")
+            :WaitForChild("BotanistDefinitions"))
+        _botanistDefs = (ok and type(d) == "table") and d or {}
+    end
+    return _botanistDefs
+end
+
+local function getBotanistAcceptedMutations(questMutation)
+    local defs = getBotanistDefinitions()
+    local questData = defs.MutationQuests and defs.MutationQuests[questMutation]
+    local accepted = (questData and questData.AcceptedMutations) or { questMutation }
+    local set = {}
+    for _, m in ipairs(accepted) do set[m] = true end
+    return set
+end
+
+local function getBotanistMutationDisplayName(questMutation)
+    local defs = getBotanistDefinitions()
+    local questData = defs.MutationQuests and defs.MutationQuests[questMutation]
+    local accepted = (questData and questData.AcceptedMutations) or { questMutation }
+    if #accepted == 1 then return accepted[1] end
+    return table.concat(accepted, " Or ")
+end
+
+-- Read required ripeness from local BotanistDefinitions (nil = any ripeness)
+local function getBotanistRequiredRipeness(questMutation)
+    local defs = getBotanistDefinitions()
+    local questData = defs.MutationQuests and defs.MutationQuests[questMutation]
+    if questData then
+        local r = questData.RequiredRipeness or questData.Ripeness or questData.RipenessStage
+        if type(r) == "string" and r ~= "" then
+            return normalizeRipenessStageName(r)
+        end
+    end
+    return nil
+end
+
+local function formatKgBotanist(weight)
+    local v = math.floor((weight or 0) * 10 + 0.5) / 10
+    if v == math.floor(v) then return tostring(math.floor(v)) end
+    return string.format("%.1f", v)
+end
+
+local function botanistFruitMutationMatches(mutationAttr, acceptedSet)
+    if not mutationAttr or type(mutationAttr) ~= "string" or mutationAttr == "" then return false end
+    for entry in mutationAttr:gmatch("([^,]+)") do
+        local m = entry:match("^%s*(.-)%s*$")
+        if acceptedSet[m] then return true end
+    end
+    return false
+end
+
+-- True if a Fruit object satisfies both mutation AND ripeness requirements
+local function botanistFruitMatches(fruitObj, acceptedSet, requiredRipeness)
+    if not botanistFruitMutationMatches(fruitObj:GetAttribute("Mutation"), acceptedSet) then
+        return false
+    end
+    if requiredRipeness then
+        local stage = normalizeRipenessStageName(tostring(fruitObj:GetAttribute("RipenessStage") or ""))
+        if stage == "" or stage ~= requiredRipeness then return false end
+    end
+    return true
+end
+
+-- Count matching harvested tools in backpack + character
+local function countBotanistFruitsInInventory(acceptedSet, requiredRipeness)
+    local count = 0
+    local function scanContainer(container)
+        if not container then return end
+        for _, tool in ipairs(container:GetChildren()) do
+            if tool:IsA("Tool") and tool:GetAttribute("IsHarvested") then
+                if botanistFruitMutationMatches(tool:GetAttribute("Mutation"), acceptedSet) then
+                    if not requiredRipeness then
+                        count = count + 1
+                    else
+                        local stage = normalizeRipenessStageName(tostring(tool:GetAttribute("RipenessStage") or ""))
+                        if stage == requiredRipeness then count = count + 1 end
+                    end
+                end
+            end
+        end
+    end
+    scanContainer(player:FindFirstChild("Backpack"))
+    if player.Character then scanContainer(player.Character) end
+    return count
+end
+
+-- True if any unharvested fruit in ClientPlants passes mutation + ripeness
+local function gardenHasBotanistFruits(acceptedSet, requiredRipeness)
+    local clientPlants = workspace:FindFirstChild("ClientPlants")
+    if not clientPlants then return false end
+    for _, plant in pairs(clientPlants:GetChildren()) do
+        for _, obj in ipairs(plant:GetDescendants()) do
+            if type(obj.Name) == "string" and obj.Name:match("^Fruit%d+$") then
+                if botanistFruitMatches(obj, acceptedSet, requiredRipeness) then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- Harvest plants containing at least one qualifying fruit
+local function harvestBotanistMutationFruits(acceptedSet, requiredRipeness)
+    local clientPlants = workspace:FindFirstChild("ClientPlants")
+    if not clientPlants then return end
+    for _, plant in pairs(clientPlants:GetChildren()) do
+        local hasMatch = false
+        for _, obj in ipairs(plant:GetDescendants()) do
+            if type(obj.Name) == "string" and obj.Name:match("^Fruit%d+$") then
+                if botanistFruitMatches(obj, acceptedSet, requiredRipeness) then
+                    hasMatch = true
+                    break
+                end
+            end
+        end
+        if hasMatch then
+            for _, v in ipairs(plant:GetDescendants()) do
+                if v:IsA("ProximityPrompt") and v.Name == "HarvestPrompt" then
+                    v.HoldDuration = 0
+                    if typeof(fireproximityprompt) == "function" then
+                        pcall(fireproximityprompt, v)
+                    else
+                        pcall(function() v:InputHoldBegin() end)
+                        task.wait(0.005)
+                        pcall(function() v:InputHoldEnd() end)
+                    end
+                    task.wait(0.3)
+                    break
+                end
+            end
+        end
+    end
+end
+
+-- Returns (mutationKey, displayName, displayText, rawResult, requiredRipeness)
+local function fetchBotanistQuest()
+    local ok, result = pcall(function()
+        return BotanistQuestRemote:InvokeServer("GetQuest")
+    end)
+    if not ok or not result or result.Status == "error" then
+        return nil, nil, "Failed to fetch quest", nil, nil
+    end
+    local mutation = tostring(result.Mutation or "")
+    if mutation == "" then
+        return nil, nil, "No active quest", nil, nil
+    end
+    local displayName = getBotanistMutationDisplayName(mutation)
+
+    -- Ripeness: prefer server result, fall back to local defs
+    local requiredRipeness = nil
+    if type(result.RequiredRipeness) == "string" and result.RequiredRipeness ~= "" then
+        requiredRipeness = normalizeRipenessStageName(result.RequiredRipeness)
+    else
+        requiredRipeness = getBotanistRequiredRipeness(mutation)
+    end
+    local ripenessLabel = requiredRipeness and (" [" .. requiredRipeness .. "]") or ""
+
+    local displayText
+    if result.Status == "new_quest" then
+        local tgt = formatKgBotanist(tonumber(result.TargetWeight) or 0)
+        displayText = string.format("%s%s — 0kg / %skg", displayName, ripenessLabel, tgt)
+    elseif result.Status == "quest_reminder" then
+        local cur = formatKgBotanist(tonumber(result.TotalWeight) or 0)
+        local tgt = formatKgBotanist(tonumber(result.TargetWeight) or 0)
+        displayText = string.format("%s%s — %skg / %skg", displayName, ripenessLabel, cur, tgt)
+    else
+        displayText = displayName .. ripenessLabel .. " (status: " .. tostring(result.Status) .. ")"
+    end
+    return mutation, displayName, displayText, result, requiredRipeness
+end
+
+local botanistQuestParagraph = BotanistSection:Paragraph({
+    Title = "Current Quest",
+    Desc  = "Click Refresh Quest to load",
+})
+
+BotanistSection:Button({
+    Title = "Refresh Quest",
+    Desc  = "Fetch current Botanist quest",
+    Icon  = "solar:refresh-bold",
+    Callback = function()
+        local _, _, text = fetchBotanistQuest()
+        pcall(function() botanistQuestParagraph:SetDesc(text) end)
+        WindUI:Notify({ Title = "Botanist Quest", Content = text, Icon = "info", Duration = 5 })
+    end,
+})
+
+BotanistSection:Space()
+
+local autoBotanist = false
+
+local AutoBotanistToggle = BotanistSection:Toggle({
+    Title = "Auto Complete Botanist",
+    Desc  = "Harvest and Submit Fruit Requirments Then Submit",
+    Value = false,
+    Callback = function(state)
+        autoBotanist = state
+        WindUI:Notify({
+            Title   = "Botanist",
+            Content = state and "Auto-botanist enabled" or "Auto-botanist disabled",
+            Icon    = "info",
+            Duration = 2,
+        })
+    end,
+})
+trackConfigElement("AutoBotanistToggle", AutoBotanistToggle)
+
+-- Auto-botanist loop: keeps cycling harvest→submit until target kg is hit
+task.spawn(function()
+    local lastQuestMutation = nil
+    while scriptRunning do
+        if not autoBotanist then
+            task.wait(1)
+        else
+            local questMutation, displayName, displayText, questResult, requiredRipeness = fetchBotanistQuest()
+
+            if not questMutation then
+                task.wait(2)
+            else
+                -- Announce quest if it changed (new or rolled over)
+                if questMutation ~= lastQuestMutation then
+                    lastQuestMutation = questMutation
+                    WindUI:Notify({ Title = "Botanist Quest", Content = displayText, Icon = "info", Duration = 5 })
+                end
+                pcall(function() botanistQuestParagraph:SetDesc(displayText) end)
+
+                local currentKg = tonumber(questResult and questResult.TotalWeight) or 0
+                local targetKg  = tonumber(questResult and questResult.TargetWeight) or 0
+
+                if targetKg > 0 and currentKg >= targetKg then
+                    -- Nothing left to do for this quest
+                    task.wait(2)
+                else
+                    local accepted = getBotanistAcceptedMutations(questMutation)
+
+                    -- Step 1: harvest qualifying fruits from the garden
+                    if gardenHasBotanistFruits(accepted, requiredRipeness) then
+                        harvestBotanistMutationFruits(accepted, requiredRipeness)
+                        task.wait(0.8) -- let fruits settle into inventory
+                    end
+
+                    -- Step 2: only proceed if there are matching fruits in inventory
+                    local invCount = countBotanistFruitsInInventory(accepted, requiredRipeness)
+                    if invCount == 0 then
+                        -- Nothing to submit and nothing in garden — wait and re-scan
+                        task.wait(2)
+                    else
+                        -- Step 3: save position → teleport to Maya's table
+                        local char = player.Character
+                        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+                        local savedCFrame = hrp and hrp.CFrame
+
+                        local submitPart
+                        pcall(function()
+                            submitPart = workspace.MapPhysical.Botanist.BotanistTable.StarryShine
+                        end)
+                        if hrp and submitPart then
+                            hrp.CFrame = CFrame.new(submitPart.Position + Vector3.new(0, 3, 0))
+                            task.wait(0.5)
+                        end
+
+                        -- Step 4: submit
+                        local ok2, res = pcall(function()
+                            return BotanistQuestRemote:InvokeServer("TurnInAll")
+                        end)
+                        if ok2 and res then
+                            if res.Status == "complete" then
+                                lastQuestMutation = nil -- quest rolled over; re-announce next loop
+                                pcall(function() botanistQuestParagraph:SetDesc("Quest complete! Fetching next quest...") end)
+                                WindUI:Notify({ Title = "Botanist", Content = "Quest complete! Reward received!", Icon = "check", Duration = 3 })
+                            elseif res.Status == "progress" then
+                                local ripenessLabel = requiredRipeness and (" [" .. requiredRipeness .. "]") or ""
+                                local cur = formatKgBotanist(tonumber(res.TotalWeight) or 0)
+                                local tgt = formatKgBotanist(tonumber(res.TargetWeight) or 0)
+                                local txt = string.format("%s%s — %skg / %skg", displayName, ripenessLabel, cur, tgt)
+                                pcall(function() botanistQuestParagraph:SetDesc(txt) end)
+                            end
+                            -- "none_found" / "no_active_quest" → fall through to return and re-scan
+                        end
+
+                        -- Step 5: return to saved position
+                        task.wait(0.3)
+                        if hrp and savedCFrame then hrp.CFrame = savedCFrame end
+                        task.wait(0.3)
+                        -- No long wait — immediately loop back to keep filling the kg target
+                    end
+                end
+            end
+        end
     end
 end)
 
