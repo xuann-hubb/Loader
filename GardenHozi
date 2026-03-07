@@ -1517,7 +1517,7 @@ local seedsByRarity = {
 local rarityList = {"Common", "Uncommon", "Rare", "Epic", "Legendary"}
 local ripenessStageList = {"Lush", "Ripened", "Unripe"}
 local fruitVariantList = {"Silver", "Gold", "Normal"}
-local fruitMutationList = {"Sandy","Soaked","Shocked","Nova","Starstruck","Snowy","Foggy","Meteoric","Tidal","Flooded","Chilled","Frostbit","Muddy","Mossy"}
+local fruitMutationList = {"Sandy","Soaked","Shocked","Nova","Starstruck","Snowy","Foggy","Meteoric","Tidal","Flooded","Chilled","Frostbit","Muddy","Mossy","Banned","Salad","Party"}
 local seedPackList = {
     "Gardener Seed Pack",
     "Premium Gardener Seed Pack",
