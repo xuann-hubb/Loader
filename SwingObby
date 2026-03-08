@@ -1,0 +1,643 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local camera = workspace.CurrentCamera
+
+-- ================= STATE & REMOTES =================
+local upgradeRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("UpgradeStats")
+local rebirthRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Rebirth")
+
+-- Multi=true dropdowns return tables, so store as tables
+local selectedRarity = {}
+local autoGetBrainrot = false
+
+local playerUsername = player.Name
+
+local autoPower = false
+local autoDistance = false
+local autoGrab = false
+local autoUpgradePlot = false
+local autoRebirth = false
+local selectedPowerAmt = 10
+local selectedDistanceAmt = 10
+
+-- ================= HELPER FUNCTIONS =================
+
+-- Reliable teleport using PivotTo + zero velocity
+local function teleportTo(targetCFrame)
+    local char = player.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    char:PivotTo(targetCFrame)
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+end
+
+-- Get CFrame from any instance (BasePart or Model)
+local function getCFrame(obj)
+    if not obj then return CFrame.new() end
+    if obj:IsA("BasePart") then
+        return obj.CFrame
+    elseif obj:IsA("Model") then
+        if obj.PrimaryPart then
+            return obj.PrimaryPart.CFrame
+        end
+        local part = obj:FindFirstChildWhichIsA("BasePart", true)
+        if part then return part.CFrame end
+        return obj:GetPivot()
+    end
+    return CFrame.new()
+end
+
+-- Find this player's owned plot by scanning all known attribute names + name fallback
+local function findOwnerPlot()
+    local ok, plots = pcall(function() return workspace.Plots:GetChildren() end)
+    if not ok or not plots then return nil end
+    local idStr = tostring(player.UserId)
+    local attrVariants = { "OwnerUserID", "OwnerUserId", "OwnerId", "OwnerID", "UserId", "UserID" }
+    for _, plot in ipairs(plots) do
+        for _, attrName in ipairs(attrVariants) do
+            local ok2, val = pcall(function() return plot:GetAttribute(attrName) end)
+            if ok2 and val and tostring(val) == idStr then
+                return plot
+            end
+        end
+        -- Fallback: match by name attribute
+        local ok3, nameAttr = pcall(function()
+            return plot:GetAttribute("OwnerName") or plot:GetAttribute("Owner")
+        end)
+        if ok3 and nameAttr and tostring(nameAttr) == playerUsername then
+            return plot
+        end
+    end
+    return nil
+end
+
+-- Check if a value is in a selection (handles both table from Multi and plain string)
+local function isSelected(value, selection)
+    if type(selection) == "table" then
+        for _, v in ipairs(selection) do
+            if v == value then return true end
+        end
+        return false
+    end
+    return tostring(selection) == tostring(value)
+end
+
+-- ================= LOAD WINDUI =================
+local WindUI = loadstring(game:HttpGet(
+    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
+))()
+
+-- ================= SET FONT (IMPORTANT) =================
+-- WindUI text font
+WindUI:SetFont("rbxasset://fonts/families/GothamSSm.json")
+
+-- ================= key system =================
+local BaseURL = "https://new.pandadevelopment.net/api/v1"
+local Client_ServiceID = "xuanketsyste" -- <- Change this to your service ID
+
+WindUI.Services.newpandadevelopment = {
+    Name = "New Panda Development",
+    Icon = "key",
+    Args = { "ServiceID" },
+
+    New = function(ServiceID)
+        -- Use ServiceID if provided
+        local ServiceIDToUse = ServiceID or Client_ServiceID
+
+        -- Get Hardware ID
+        local function getHardwareId()
+            local success, hwid = pcall(gethwid)
+            if success and hwid then return hwid end
+
+            local RbxAnalyticsService = game:GetService("RbxAnalyticsService")
+            local clientId = tostring(RbxAnalyticsService:GetClientId())
+            return clientId:gsub("-", "")
+        end
+
+        -- HTTP POST Request wrapper
+        local function makeRequest(endpoint, body)
+            local url = BaseURL .. endpoint
+            local jsonBody = HttpService:JSONEncode(body)
+
+            local response = request({
+                Url = url,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = jsonBody
+            })
+
+            if response and response.Body then
+                return HttpService:JSONDecode(response.Body)
+            end
+
+            return nil
+        end
+
+        -- Validate a key
+        local function validateKey(key, Premium_Verification)
+            if not key or key == "" then return false, "Invalid key" end
+
+            local hwid = getHardwareId()
+            local result = makeRequest("/keys/validate", {
+                ServiceID = ServiceIDToUse,
+                HWID = hwid,
+                Key = key
+            })
+
+            if not result then
+                return false, "Failed to connect to server"
+            end
+
+            local isAuthenticated = result.Authenticated_Status == "Success"
+            local isPremium = result.Key_Premium or false
+            local isValid = isAuthenticated
+            local message = result.Note or (isAuthenticated and "Key validated!" or "Invalid key")
+
+            if Premium_Verification and isAuthenticated and not isPremium then
+                isValid = false
+                message = "Premium key required"
+            end
+
+            return isValid, message, isPremium, result.Expire_Date
+        end
+
+        -- Get Key URL
+        local function getKeyURL()
+            local hwid = getHardwareId()
+            return "https://new.pandadevelopment.net/getkey/" .. ServiceIDToUse .. "?hwid=" .. hwid
+        end
+
+        -- Copy Key URL to clipboard
+        local function copyLink()
+            local url = getKeyURL()
+            if setclipboard then
+                setclipboard(url)
+                print("Key URL copied to clipboard: " .. url)
+            end
+            return url
+        end
+
+        return {
+            Verify = validateKey,
+            Copy = copyLink,
+            GetLink = getKeyURL
+        }
+    end
+}
+
+
+-- ================= CREATE WINDUI WINDOW =================
+local Window = WindUI:CreateWindow({
+    Folder = "XuanHub",
+    Title = "XUAN HUB",
+    Author = "by discord.gg/zVkS5xbaqq",
+    Icon = "rbxassetid://103326199885496",
+    Theme = "Dark",
+    Size = UDim2.fromOffset(640, 480),
+    Draggable = true,
+    HasOutline = true,
+    HideSearchBar = false,
+    OutlineThickness = 3,
+    Resizable = true,
+    Transparent = true,
+    User = {
+        Enabled = true,
+    },
+
+KeySystem = {
+        Note = "Key System for Xuan Hub.",
+        SaveKey = true,
+        API = {
+            {
+                Title = "Get key here",
+                Desc = "Click to copy.",
+               Type = "newpandadevelopment", 
+                ServiceID = "xuanketsyste",
+            },
+        },
+    },
+})
+
+Window:EditOpenButton({
+    OnlyMobile = false,
+    Enabled = true,
+    Draggable = true,
+})
+
+-- Add version tag with FPS and Ping counter
+local version = game.PlaceVersion -- Server version
+local fps = 0
+local ping = 0
+local Stats = game:GetService("Stats")
+
+local VersionTag = Window:Tag({
+    Title = string.format("v%d | Ping: 0 | FPS: 0", version),
+    Icon = "solar:server-bold",
+    Color = Color3.fromRGB(255, 105, 180), -- Pink color
+    Border = true,
+})
+
+local frames = 0
+local last = os.clock()
+
+RunService.RenderStepped:Connect(function()
+    frames = frames + 1
+    local now = os.clock()
+    if now - last >= 1 then
+        fps = frames
+        frames = 0
+        last = now
+
+        -- Get ping
+        pcall(function()
+            local item = Stats.Network.ServerStatsItem:FindFirstChild("Data Ping")
+            if item then
+                ping = math.floor(item:GetValue())
+            end
+        end)
+
+        -- Update tag
+        VersionTag:SetTitle(string.format("v%d | Ping: %d | FPS: %d", version, ping, fps))
+    end
+end)
+
+local MiscTab = Window:Tab({
+    Title = "Settings",
+    Icon = "settings",
+    Locked = false,
+})
+
+
+
+
+-- Anti-AFK (Always Enabled - Prevents 20 min AFK kick)
+local vu = game:GetService("VirtualUser")
+player.Idled:Connect(function()
+    vu:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    vu:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+end)
+
+-- Auto Reconnect (Always Enabled)
+pcall(function()
+    game.CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
+        if child.Name == 'ErrorPrompt' and child:FindFirstChild('MessageArea') and child.MessageArea:FindFirstChild("ErrorFrame") then
+            game:GetService("TeleportService"):Teleport(game.PlaceId, player)
+        end
+    end)
+end)
+
+local MiscSettings = MiscTab:Section({
+    Title = "Game Settings",
+    Opened = true,
+})
+
+-- Anti-AFK (Always On)
+MiscSettings:Button({
+    Title = "Anti-AFK (Always On)",
+    Desc = "Prevents AFK kick - Always enabled",
+    Callback = function()
+        WindUI:Notify({ Title = "Info", Content = "Anti-AFK is always enabled", Icon = "info", Duration = 2 })
+    end
+})
+
+MiscSettings:Space()
+
+-- Auto Reconnect (Always On)
+MiscSettings:Button({
+    Title = "Auto Reconnect (Always On)",
+    Desc = "Auto rejoin on disconnect - Always enabled",
+    Callback = function()
+        WindUI:Notify({ Title = "Info", Content = "Auto Reconnect is always enabled", Icon = "info", Duration = 2 })
+    end
+})
+
+MiscTab:Space()
+
+MiscTab:Section({
+    Title = "Server Actions",
+    Opened = true,
+})
+
+local ServerGroup = MiscTab:Group()
+
+ServerGroup:Button({
+    Title = "Server Hop",
+    Icon = "solar:refresh-bold",
+    Callback = function()
+        Window:ServerHop()
+    end
+
+
+})
+
+ServerGroup:Space()
+
+ServerGroup:Button({
+    Title = "Rejoin",
+    Icon = "solar:restart-bold",
+    Callback = function()
+        game:GetService("TeleportService"):Teleport(game.PlaceId, player)
+    end
+})
+
+-- ================= MAIN TAB =================
+local MainTab = Window:Tab({
+    Title = "Swing Obby",
+    Icon = "star",
+    Locked = false,
+})
+
+-- ================= SWING OBBY BRAINROT =================
+
+local BrainrotSection = MainTab:Section({
+    Title = "Auto Get Brainrot",
+    Opened = true,
+})
+
+BrainrotSection:Dropdown({
+    Title = "Rarity",
+    Icon = "solar:star-bold",
+    Desc = "Select the rarity to target",
+    Values = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Secret" },
+    Value = "Common",
+    Multi = true,
+    AllowNone = true,
+    SearchBarEnabled = true,
+    Callback = function(value)
+        selectedRarity = value
+    end,
+})
+
+BrainrotSection:Space()
+
+BrainrotSection:Toggle({
+    Title = "Auto Get Brainrot",
+    Icon = "solar:play-bold",
+    Desc = "Teleports to and collects matching brainrots",
+    Value = false,
+    Callback = function(state)
+        autoGetBrainrot = state
+        if state then
+            task.spawn(function()
+                while autoGetBrainrot do
+                    pcall(function()
+                        local activeBrainrots = workspace.ActiveBrainrots:GetChildren()
+                        for _, hitbox in ipairs(activeBrainrots) do
+                            if not autoGetBrainrot then break end
+
+                            if hitbox then
+                                local rarityAttr = hitbox:GetAttribute("Rarity")
+                                local spawnCF = hitbox:GetAttribute("SpawnCFrame")
+
+                                local rarityMatch = next(selectedRarity) == nil or isSelected(rarityAttr, selectedRarity)
+
+                                if rarityMatch then
+                                    -- Use SpawnCFrame attribute if available, else fall back to hitbox CFrame
+                                    local targetCF = spawnCF or getCFrame(hitbox)
+                                    teleportTo(targetCF + Vector3.new(0, 5, 0))
+                                    task.wait(0.3)
+                                    teleportTo(targetCF + Vector3.new(0, 3, 0))
+                                    task.wait(0.4)
+
+                                    -- Search recursively for ProximityPrompt anywhere under hitbox
+                                    local prompt = hitbox:FindFirstChildOfClass("ProximityPrompt", true)
+                                    if not prompt then
+                                        local attachment = hitbox:FindFirstChild("Attachment")
+                                        if attachment then
+                                            prompt = attachment:FindFirstChildOfClass("ProximityPrompt")
+                                        end
+                                    end
+
+                                    if prompt then
+                                        fireproximityprompt(prompt)
+                                    end
+                                    task.wait(1)
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end,
+})
+
+BrainrotSection:Space()
+
+-- ================= GO TO BASE =================
+
+BrainrotSection:Button({
+    Title = "Go to Your Base",
+    Icon = "solar:home-bold",
+    Desc = "Teleports you to your own plot",
+    Callback = function()
+        local plot = findOwnerPlot()
+        if plot then
+            teleportTo(getCFrame(plot) + Vector3.new(0, 5, 0))
+            WindUI:Notify({
+                Title = "Teleported",
+                Content = "Teleported to your base: " .. plot.Name,
+                Icon = "solar:home-bold",
+                Duration = 3,
+            })
+        else
+            WindUI:Notify({
+                Title = "Base Not Found",
+                Content = "No plot owned by you was found. Use Debug button.",
+                Icon = "info",
+                Duration = 3,
+            })
+        end
+    end,
+})
+
+
+
+-- ================= AUTOMATION TAB =================
+local AutoTab = Window:Tab({
+    Title = "Automation",
+    Icon = "solar:settings-bold",
+    Locked = false,
+})
+
+local UpgradeSection = AutoTab:Section({
+    Title = "Stat Upgrades",
+    Opened = true,
+})
+
+-- Auto Upgrade Power
+UpgradeSection:Dropdown({
+    Title = "Power Amount",
+    Icon = "solar:bolt-bold",
+    Desc = "Amount to upgrade Power per tick",
+    Values = { "1", "5", "10" },
+    Value = "10",
+    Multi = false,
+    AllowNone = false,
+    SearchBarEnabled = false,
+    Callback = function(value)
+        selectedPowerAmt = tonumber(value)
+    end,
+})
+
+UpgradeSection:Space()
+
+UpgradeSection:Toggle({
+    Title = "Auto Upgrade Power",
+    Icon = "solar:bolt-bold",
+    Desc = "Automatically upgrades Power stat",
+    Value = false,
+    Callback = function(state)
+        autoPower = state
+        if state then
+            task.spawn(function()
+                while autoPower do
+                    pcall(function()
+                        upgradeRemote:FireServer("Power", selectedPowerAmt)
+                    end)
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end,
+})
+
+UpgradeSection:Space()
+
+-- Auto Upgrade Distance
+UpgradeSection:Dropdown({
+    Title = "Distance Amount",
+    Icon = "solar:map-arrow-right-bold",
+    Desc = "Amount to upgrade Reach Distance per tick",
+    Values = { "1", "5", "10" },
+    Value = "10",
+    Multi = false,
+    AllowNone = false,
+    SearchBarEnabled = false,
+    Callback = function(value)
+        selectedDistanceAmt = tonumber(value)
+    end,
+})
+
+UpgradeSection:Space()
+
+UpgradeSection:Toggle({
+    Title = "Auto Upgrade Distance",
+    Icon = "solar:map-arrow-right-bold",
+    Desc = "Automatically upgrades Reach Distance stat",
+    Value = false,
+    Callback = function(state)
+        autoDistance = state
+        if state then
+            task.spawn(function()
+                while autoDistance do
+                    pcall(function()
+                        upgradeRemote:FireServer("Reach_Distance", selectedDistanceAmt)
+                    end)
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end,
+})
+
+UpgradeSection:Space()
+
+-- Auto Upgrade Grab Amount
+UpgradeSection:Toggle({
+    Title = "Auto Upgrade Grab Amount",
+    Icon = "solar:hand-shake-bold",
+    Desc = "Automatically upgrades Grab Amount stat",
+    Value = false,
+    Callback = function(state)
+        autoGrab = state
+        if state then
+            task.spawn(function()
+                while autoGrab do
+                    pcall(function()
+                        upgradeRemote:FireServer("GrabAmount", 1)
+                    end)
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end,
+})
+
+UpgradeSection:Space()
+
+-- Auto Upgrade Plot Buttons
+local PlotSection = AutoTab:Section({
+    Title = "Plot Upgrades",
+    Opened = true,
+})
+
+PlotSection:Toggle({
+    Title = "Auto Upgrade Plot",
+    Icon = "solar:shop-bold",
+    Desc = "Automatically upgrade your plot",
+    Value = false,
+    Callback = function(state)
+        autoUpgradePlot = state
+        if state then
+            task.spawn(function()
+                while autoUpgradePlot do
+                    pcall(function()
+                        local ownerPlot = findOwnerPlot()
+                        if ownerPlot then
+                            local buttons = ownerPlot:FindFirstChild("Buttons")
+                            if buttons then
+                                for _, btn in ipairs(buttons:GetChildren()) do
+                                    if not autoUpgradePlot then break end
+                                    local touchPart = btn:FindFirstChild("TouchPart")
+                                    if touchPart then
+                                        local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                                        if rootPart then
+                                            firetouchinterest(touchPart, rootPart, 0)
+                                            task.wait(0.05)
+                                            firetouchinterest(touchPart, rootPart, 1)
+                                            task.wait(0.05)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end,
+})
+
+PlotSection:Space()
+
+-- Auto Rebirth
+PlotSection:Toggle({
+    Title = "Auto Rebirth",
+    Icon = "solar:refresh-circle-bold",
+    Desc = "Automatically rebirths when possible",
+    Value = false,
+    Callback = function(state)
+        autoRebirth = state
+        if state then
+            task.spawn(function()
+                while autoRebirth do
+                    pcall(function()
+                        rebirthRemote:FireServer()
+                    end)
+                    task.wait(1)
+                end
+            end)
+        end
+    end,
+})
