@@ -2810,7 +2810,7 @@ do
             textLabel.Position = UDim2.new(0, 0, 0, 0)
             textLabel.Size = UDim2.fromScale(1, 0.5)
             textLabel.Font = Enum.Font.GothamBold
-            textLabel.TextScaled = true
+            textLabel.TextSize = 12
             textLabel.TextStrokeTransparency = 0.35
             textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             textLabel.Text = weightText
@@ -2822,7 +2822,7 @@ do
             valueLabel.Position = UDim2.new(0, 0, 0.5, 0)
             valueLabel.Size = UDim2.fromScale(1, 0.5)
             valueLabel.Font = Enum.Font.GothamBold
-            valueLabel.TextScaled = true
+            valueLabel.TextSize = 12
             valueLabel.TextStrokeTransparency = 0.35
             valueLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
             valueLabel.Text = valueText
