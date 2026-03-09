@@ -3534,6 +3534,104 @@ task.spawn(function()
     end
 end)
 
+-- ========== MANNY EVENT SECTION ==========
+local MannySection = EventsTab:Section({ Title = "Manny Event", Opened = true })
+
+local mannyTimerParagraph = MannySection:Paragraph({
+    Title = "Manny Event timer",
+    Desc  = "Loading...",
+})
+
+local function getMannyTimerText()
+    local ok, txt = pcall(function()
+        local countdown = workspace.MapPhysical.MannyCountdownAppear.Holder.Countdown
+        if countdown:IsA("TextLabel") then
+            return tostring(countdown.Text)
+        end
+        local textNode = countdown:FindFirstChild("Text")
+        if textNode and textNode:IsA("TextLabel") then
+            return tostring(textNode.Text)
+        end
+        if textNode and textNode:IsA("GuiObject") then
+            local nested = textNode:FindFirstChild("Text")
+            if nested and nested:IsA("TextLabel") then
+                return tostring(nested.Text)
+            end
+        end
+        return "Unavailable"
+    end)
+    if ok and txt and txt ~= "" then
+        return txt
+    end
+    return "Unavailable"
+end
+
+local function collectAllMannyFruits()
+    local collectibles = workspace:FindFirstChild("MannyMishapCollectibles")
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not collectibles or not hrp then return 0 end
+
+    if typeof(firetouchinterest) ~= "function" then return 0 end
+
+    local anchors = {}
+    for _, model in ipairs(collectibles:GetChildren()) do
+        local anchor = model:FindFirstChild("Anchor") or model:FindFirstChild("Anchor", true)
+        if anchor and anchor:IsA("BasePart") then
+            local ti = anchor:FindFirstChild("TouchInterest") or anchor:FindFirstChildOfClass("TouchTransmitter")
+            if ti then anchors[#anchors + 1] = anchor end
+        end
+    end
+
+    -- Batch touch begin on all anchors first, then touch end on all anchors.
+    for _, anchor in ipairs(anchors) do
+        pcall(firetouchinterest, hrp, anchor, 0)
+    end
+    for _, anchor in ipairs(anchors) do
+        pcall(firetouchinterest, hrp, anchor, 1)
+    end
+
+    return #anchors
+end
+
+local autoCollectManny = false
+local AutoCollectMannyToggle = MannySection:Toggle({
+    Title = "Auto Collect Manny Fruit",
+    Desc  = "Automatically collect Manny Mishap fruits when the event is active",
+    Value = false,
+    Callback = function(state)
+        autoCollectManny = state
+        WindUI:Notify({
+            Title = "Manny Event",
+            Content = state and "Auto collect enabled" or "Auto collect disabled",
+            Icon = "info",
+            Duration = 2,
+        })
+    end,
+})
+trackConfigElement("AutoCollectMannyToggle", AutoCollectMannyToggle)
+
+task.spawn(function()
+    while scriptRunning do
+        local timerText = getMannyTimerText()
+        pcall(function()
+            mannyTimerParagraph:SetDesc(timerText)
+        end)
+
+        if autoCollectManny then
+            local found = workspace:FindFirstChild("MannyMishapCollectibles")
+            if found then
+                collectAllMannyFruits()
+                task.wait(0.25)
+            else
+                task.wait(0.5)
+            end
+        else
+            task.wait(1)
+        end
+    end
+end)
+
 local AboutTab = Window:Tab({
     Title = "About",
     Icon = "lucide:notebook-text",
