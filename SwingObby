@@ -513,7 +513,14 @@ DupeSection:Toggle({
 
                     if not autoDupe then break end
 
-                    task.wait(dupeReturnDelay)
+                    local untilTime = os.clock() + dupeReturnDelay
+                    while autoDupe and os.clock() < untilTime do
+                        pcall(function()
+                            tryCollectBrainrotByRarity(selectedDupeRarity)
+                        end)
+                        task.wait(0.2)
+                    end
+
                     local plot = findOwnerPlot()
                     if plot then
                         teleportTo(getCFrame(plot) + Vector3.new(0, 5, 0))
